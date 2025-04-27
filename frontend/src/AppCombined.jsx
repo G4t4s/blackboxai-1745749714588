@@ -8,7 +8,7 @@ export default function AppCombined() {
 
   const handleImageChange = (e) => {
     if (e.target.files && e.target.files.length > 0) {
-      setSelectedImages(Array.from(e.target.files));
+      setSelectedImages((prevImages) => [...prevImages, ...Array.from(e.target.files)]);
       setUploadMessage('');
       setOcrResults({});
     }

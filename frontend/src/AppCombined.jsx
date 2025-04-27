@@ -4,16 +4,26 @@ import InteractiveCodeRunner from './InteractiveCodeRunner';
 export default function AppCombined() {
   const [selectedImages, setSelectedImages] = useState([]);
   const [uploadMessage, setUploadMessage] = useState('');
+  const [ocrResults, setOcrResults] = useState({});
 
   const handleImageChange = (e) => {
     if (e.target.files && e.target.files.length > 0) {
       setSelectedImages(Array.from(e.target.files));
       setUploadMessage('');
+      setOcrResults({});
     }
   };
 
   const handleImageRemove = (indexToRemove) => {
     setSelectedImages((prev) => prev.filter((_, i) => i !== indexToRemove));
+    setOcrResults((prev) => {
+      const newResults = { ...prev };
+      const removedImage = selectedImages[indexToRemove];
+      if (removedImage && removedImage.name in newResults) {
+        delete newResults[removedImage.name];
+      }
+      return newResults;
+    });
   };
 
   const handleImageUpload = async () => {
@@ -34,6 +44,9 @@ export default function AppCombined() {
       const data = await response.json();
       if (response.ok) {
         setUploadMessage(data.message);
+        if (data.ocr_texts) {
+          setOcrResults(data.ocr_texts);
+        }
       } else {
         setUploadMessage(data.error || 'Upload failed');
       }
@@ -55,13 +68,13 @@ export default function AppCombined() {
           className="mb-4"
         />
         {selectedImages.length > 0 && (
-          <div className="mb-4 flex flex-wrap gap-2 max-h-64 overflow-auto border rounded p-2">
+          <div className="mb-4 flex flex-col gap-4 max-h-96 overflow-auto border rounded p-2">
             {selectedImages.map((image, index) => (
-              <div key={index} className="relative">
+              <div key={index} className="relative border rounded p-2">
                 <img
                   src={URL.createObjectURL(image)}
                   alt={`Selected ${index + 1}`}
-                  className="max-h-24 object-contain rounded"
+                  className="max-h-24 object-contain rounded mb-2"
                 />
                 <button
                   onClick={() => handleImageRemove(index)}
@@ -69,6 +82,9 @@ export default function AppCombined() {
                 >
                   &times;
                 </button>
+                <div className="whitespace-pre-wrap text-sm text-gray-700 mt-2 bg-gray-50 p-2 rounded min-h-[50px]">
+                  {ocrResults[image.name] || 'No OCR text yet'}
+                </div>
               </div>
             ))}
           </div>

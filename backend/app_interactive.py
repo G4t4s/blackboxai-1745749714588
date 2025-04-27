@@ -2,27 +2,24 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from pymongo import MongoClient
 import base64
+import subprocess
 import sys
 import traceback
 import os
 from PIL import Image
 import pytesseract
 from io import BytesIO
-from flask_socketio import SocketIO, emit
-import threading
-import queue
 
 app = Flask(__name__)
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*")
 
 # MongoDB connection string from environment variable
-MONGO_URI = os.getenv('MONGO_URI')
+MONGO_URI = "mongo uri"
 if not MONGO_URI:
     raise Exception("MONGO_URI environment variable not set. Please set it to your MongoDB Atlas connection string.")
 client = MongoClient(MONGO_URI)
-db = client['image_upload_db']
-images_collection = db['images']
+db = client['db']
+images_collection = db['collection']
 
 @app.route('/upload-image', methods=['POST'])
 def upload_image():
@@ -48,63 +45,33 @@ def upload_image():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# Interactive code execution with SocketIO
+@app.route('/compile-code', methods=['POST'])
+def compile_code():
+    try:
+        data = request.get_json()
+        code = data.get('code')
+        if not code:
+            return jsonify({'error': 'No code provided'}), 400
 
-input_queues = {}
+        # Save code to a temporary file
+        with open('temp_code.py', 'w') as f:
+            f.write(code)
 
-@socketio.on('run_code')
-def handle_run_code(data):
-    code = data.get('code')
-    sid = request.sid
-    if not code:
-        socketio.emit('error', {'error': 'No code provided'}, room=sid)
-        return
+        # Execute the code using subprocess and capture output and errors
+        result = subprocess.run([sys.executable, 'temp_code.py'], capture_output=True, text=True, timeout=5)
 
-    input_queue = queue.Queue()
-    input_queues[sid] = input_queue
+        output = result.stdout
+        errors = result.stderr
 
-    def input_func(prompt=''):
-        socketio.emit('input_request', {'prompt': prompt}, room=sid)
-        user_input = input_queue.get()
-        return user_input
+        # Remove the temporary file
+        os.remove('temp_code.py')
 
-    def output_func(text):
-        socketio.emit('output', {'text': text}, room=sid)
-
-    def run_user_code():
-        import builtins
-        original_input = builtins.input
-        original_print = builtins.print
-
-        def patched_input(prompt=''):
-            return input_func(prompt)
-
-        def patched_print(*args, **kwargs):
-            text = ' '.join(str(arg) for arg in args) + '\\n'
-            output_func(text)
-
-        builtins.input = patched_input
-        builtins.print = patched_print
-
-        try:
-            exec(code, {})
-        except Exception:
-            tb = traceback.format_exc()
-            output_func(f'Error:\\n{tb}')
-        finally:
-            builtins.input = original_input
-            builtins.print = original_print
-            socketio.emit('execution_complete', {}, room=sid)
-            input_queues.pop(sid, None)
-
-    socketio.start_background_task(run_user_code)
-
-@socketio.on('input_response')
-def handle_input_response(data):
-    sid = request.sid
-    user_input = data.get('input')
-    if user_input is not None and sid in input_queues:
-        input_queues[sid].put(user_input)
+        return jsonify({'output': output, 'errors': errors})
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'Code execution timed out'}), 408
+    except Exception as e:
+        tb = traceback.format_exc()
+        return jsonify({'error': str(e), 'traceback': tb}), 500
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True)
+    app.run(debug=True)
